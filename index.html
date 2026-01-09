@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WanStep</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* スマホでの表示崩れ防止 */
+        .safe-area-top { padding-top: env(safe-area-inset-top); }
+        .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        /* スキャンアニメーション */
+        @keyframes scan {
+          0% { top: 0%; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { top: 100%; opacity: 0; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 h-screen w-full overflow-hidden">
+    <div id="root" class="h-full"></div>
+
+    <script type="text/babel" data-type="module">
+        // インストール不要でReactとアイコンを使えるようにURLから読み込みます
+        import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18.2.0';
+        import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+        import { 
+            Camera, Upload, Play, CheckCircle, AlertCircle, Award, ChevronRight, 
+            Home, Settings, User, Activity, Heart, Info, X, MessageSquare, Send, 
+            Sparkles, Loader2, Calendar, ChefHat, Utensils, Book, PenTool, Mic, 
+            MicOff, Edit3, Image as ImageIcon, MapPin, Tent 
+        } from 'https://esm.sh/lucide-react@0.292.0';
+
+        // --- 設定エリア ---
+        // ここにAPIキーを入れてください
+        const GEMINI_API_KEY = ""; 
+
+        // --- 定数データ ---
+        const LESSONS_DATA = [
+            { id: 'sit', title: 'お座り (Sit)', difficulty: '初級', description: '基本中の基本。腰を地面につけて落ち着く姿勢を教えます。', duration: '5分', icon: '🧎', color: 'bg-orange-100 text-orange-600' },
+            { id: 'down', title: '伏せ (Down)', difficulty: '中級', description: 'お座りよりもリラックスした状態。ドッグカフェなどで役立ちます。', duration: '10分', icon: '🙇', color: 'bg-blue-100 text-blue-600' },
+            { id: 'wait', title: '待て (Wait)', difficulty: '上級', description: '衝動をコントロールする重要なコマンド。命を守ることにも繋がります。', duration: '15分', icon: '✋', color: 'bg-red-100 text-red-600' },
+            { id: 'house', title: 'ハウス (Crate)', difficulty: '初級', description: '自分だけの安心できる場所へ移動するトレーニングです。', duration: '10分', icon: '🏠', color: 'bg-green-100 text-green-600' }
+        ];
+
+        const MOCK_FEEDBACK_DATA = {
+            sit: [
+                { type: 'success', score: 95, title: '素晴らしいお座りです！', details: '腰がしっかりと地面につき、視線も飼い主さんに向いています。コマンドへの反応速度も0.5秒と非常に速いです。', tips: '次は、少し離れた場所からの指示や、おやつなしでの指示に挑戦してみましょう。' },
+                { type: 'advice', score: 60, title: 'おやつ位置が高すぎます', details: 'おやつを持つ手が高いため、犬が飛びつこうとして前足が浮いています（動画 0:03秒地点）。', tips: 'おやつを犬の鼻先から、そのまま地面に向けて垂直に下ろすイメージで誘導すると、自然に腰が落ちますよ。' }
+            ]
+        };
+
+        // --- コンポーネント定義 ---
+
+        const Header = ({ userProfile, setShowProfileModal, profileImage }) => (
+            <div className="flex justify-between items-center p-4 bg-white shadow-sm sticky top-0 z-10 safe-area-top">
+                <div className="flex items-center space-x-2">
+                <div className="bg-orange-500 p-1.5 rounded-lg">
+                    <Activity className="text-white w-5 h-5" />
+                </div>
+                <h1 className="font-bold text-xl text-gray-800">WanStep</h1>
+                </div>
+                <div className="flex items-center space-x-3 cursor-pointer active:opacity-70 transition-opacity" onClick={() => setShowProfileModal(true)}>
+                <div className="flex flex-col items-end">
+                    <div className="flex items-center space-x-1">
+                        <span className="text-xs text-gray-500">Lv.{userProfile.level}</span>
+                        <span className="text-xs font-bold text-gray-800">{userProfile.name}</span>
+                    </div>
+                    <div className="w-24 h-2 bg-gray-200 rounded-full mt-1">
+                        <div className="h-full bg-orange-500 rounded-full transition-all duration-500" style={{ width: `${(userProfile.xp / userProfile.nextLevelXp) * 100}%` }}></div>
+                    </div>
+                </div>
+                <div className="w-10 h-10 rounded-full border-2 border-orange-100 relative overflow-hidden bg-gray-100">
+                    {profileImage ? <img src={profileImage} alt="Profile" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><span className="text-xl">🐕</span></div>}
+                    <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 shadow-sm border border-gray-100 z-10"><Settings className="w-3 h-3 text-gray-400" /></div>
+                </div>
+                </div>
+            </div>
+        );
+
+        const BottomNav = ({ currentScreen, setCurrentScreen }) => (
+            <div className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-100 flex justify-around p-3 pb-6 z-10 safe-area-bottom left-0 right-0 mx-auto">
+                <button onClick={() => setCurrentScreen('home')} className={`flex flex-col items-center ${currentScreen === 'home' ? 'text-orange-500' : 'text-gray-400'}`}>
+                <Home className="w-6 h-6" /><span className="text-xs mt-1">ホーム</span>
+                </button>
+                <button onClick={() => setCurrentScreen('chat')} className={`flex flex-col items-center ${currentScreen === 'chat' ? 'text-orange-500' : 'text-gray-400'}`}>
+                <MessageSquare className="w-6 h-6" /><span className="text-xs mt-1">AI相談</span>
+                </button>
+                <button onClick={() => setCurrentScreen('diary')} className={`flex flex-col items-center ${currentScreen === 'diary' ? 'text-orange-500' : 'text-gray-400'}`}>
+                <Book className="w-6 h-6" /><span className="text-xs mt-1">日記</span>
+                </button>
+            </div>
+        );
+
+        const ProfileModal = ({ userProfile, setUserProfile, setShowProfileModal, profileImage, setProfileImage }) => {
+            const [tempProfile, setTempProfile] = useState({...userProfile});
+            const personalities = ['甘えん坊', '元気いっぱい', '臆病', 'ツンデレ', '食いしん坊', '賢い', '番犬気質', 'マイペース'];
+            const handleSave = () => { setUserProfile(tempProfile); setShowProfileModal(false); };
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => { setProfileImage(reader.result); };
+                    reader.readAsDataURL(file);
+                }
+            };
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+                <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xl font-bold text-gray-800 flex items-center"><Settings className="w-6 h-6 mr-2 text-orange-500" /> プロフィール設定</h3>
+                        <button onClick={() => setShowProfileModal(false)} className="text-gray-400 hover:text-gray-600"><X className="w-6 h-6" /></button>
+                    </div>
+                    <div className="space-y-6 overflow-y-auto flex-1 pb-4">
+                        <div className="flex flex-col items-center">
+                            <div className="relative w-24 h-24 mb-2">
+                                <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-orange-200 bg-gray-50">
+                                    {profileImage ? <img src={profileImage} alt="Profile" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><span className="text-4xl">🐕</span></div>}
+                                </div>
+                                <label className="absolute bottom-0 right-0 bg-orange-500 p-2 rounded-full text-white cursor-pointer shadow-lg active:scale-95 transition-transform">
+                                    <Camera className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+                                </label>
+                            </div>
+                            <p className="text-xs text-gray-400">写真をタップして変更</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1">お名前</label><input type="text" value={tempProfile.name} onChange={(e) => setTempProfile({...tempProfile, name: e.target.value})} className="w-full p-2 bg-gray-50 rounded-lg border border-gray-200 focus:outline-none focus:border-orange-500 text-sm" /></div>
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1">犬種</label><input type="text" value={tempProfile.breed} onChange={(e) => setTempProfile({...tempProfile, breed: e.target.value})} className="w-full p-2 bg-gray-50 rounded-lg border border-gray-200 focus:outline-none focus:border-orange-500 text-sm" /></div>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 mb-2">性別</label>
+                            <div className="flex space-x-3">
+                                {['男の子', '女の子'].map((g) => (
+                                    <button key={g} onClick={() => setTempProfile({...tempProfile, gender: g})} className={`flex-1 py-2 rounded-xl text-sm font-bold border transition-all ${tempProfile.gender === g ? 'bg-orange-50 border-orange-500 text-orange-600 ring-1 ring-orange-500' : 'bg-white border-gray-200 text-gray-400'}`}>{g === '男の子' ? '♂ 男の子' : '♀ 女の子'}</button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 mb-2">性格</label>
+                            <div className="grid grid-cols-2 gap-2">
+                                {personalities.map((p) => (
+                                    <button key={p} onClick={() => setTempProfile({...tempProfile, personality: p})} className={`py-2 px-3 rounded-lg text-xs font-medium border transition-all text-center ${tempProfile.personality === p ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{p}</button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                    <button onClick={handleSave} className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold shadow-md shadow-orange-200 active:bg-orange-600 mt-4">保存する</button>
+                </div>
+                </div>
+            );
+        };
+
+        const VideoModal = ({ setShowVideoModal, selectedLesson }) => (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                <div className="bg-black w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl relative">
+                    <button onClick={() => setShowVideoModal(false)} className="absolute top-4 right-4 text-white/80 hover:text-white z-10 bg-black/50 rounded-full p-1"><X className="w-6 h-6" /></button>
+                    <div className="aspect-video bg-gray-900 flex items-center justify-center relative">
+                        <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md"><Play className="w-8 h-8 text-white ml-1" /></div>
+                        <p className="absolute bottom-4 text-white text-sm font-medium tracking-wide">{selectedLesson?.title} のお手本</p>
+                        <div className="absolute bottom-0 w-full h-1 bg-gray-800"><div className="w-1/3 h-full bg-orange-500"></div></div>
+                    </div>
+                    <div className="p-5 bg-gray-900 text-white">
+                        <h3 className="font-bold mb-2 flex items-center text-orange-400"><Info className="w-4 h-4 mr-2" /> ポイント解説</h3>
+                        <p className="text-sm text-gray-300 leading-relaxed">1. 犬の目線に合わせてしゃがみます。<br/>2. おやつを見せて注目させます。<br/>3. 明確な声でコマンドを出しましょう。</p>
+                    </div>
+                </div>
+            </div>
+        );
+
+        const ChatScreen = ({ chatHistory, chatInput, setChatInput, handleSendMessage, isChatLoading, chatEndRef, isListening, toggleListening, listeningTarget }) => {
+            const isMyListening = isListening && listeningTarget === 'chat';
+            return (
+                <div className="flex flex-col h-full bg-gray-50 pb-20 pt-20">
+                    <div className="fixed top-0 w-full max-w-md bg-white z-10 p-4 shadow-sm flex items-center justify-between safe-area-top left-0 right-0 mx-auto">
+                        <h2 className="font-bold text-lg text-gray-800 flex items-center"><Sparkles className="w-5 h-5 text-orange-500 mr-2" /> AIトレーナー相談室</h2>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                        {chatHistory.map((msg, idx) => (
+                            <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] p-4 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-orange-500 text-white rounded-tr-none' : 'bg-white text-gray-800 rounded-tl-none border border-gray-100'}`}>{msg.text}</div>
+                            </div>
+                        ))}
+                        {isChatLoading && <div className="flex justify-start"><div className="bg-white p-4 rounded-2xl rounded-tl-none border border-gray-100 shadow-sm flex items-center space-x-2"><Loader2 className="w-4 h-4 text-orange-500 animate-spin" /><span className="text-xs text-gray-500">入力中...</span></div></div>}
+                        <div ref={chatEndRef} />
+                    </div>
+                    <div className="fixed bottom-[70px] w-full max-w-md px-4 pb-2 bg-gradient-to-t from-gray-50 to-transparent left-0 right-0 mx-auto">
+                        <div className={`flex items-center bg-white rounded-full shadow-lg border p-2 transition-colors ${isMyListening ? 'border-red-400 ring-2 ring-red-100' : 'border-gray-200'}`}>
+                            <button onClick={() => toggleListening('chat')} className={`p-2 rounded-full mr-1 transition-colors ${isMyListening ? 'text-red-500 bg-red-50' : 'text-gray-400 hover:bg-gray-100'}`}>{isMyListening ? <Mic className="w-5 h-5 animate-pulse" /> : <Mic className="w-5 h-5" />}</button>
+                            <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()} placeholder={isMyListening ? "お話しください..." : "相談内容を入力..."} className="flex-1 bg-transparent px-2 py-2 text-sm focus:outline-none" disabled={isChatLoading} />
+                            <button onClick={handleSendMessage} disabled={isChatLoading || !chatInput.trim()} className={`p-2 rounded-full ${isChatLoading || !chatInput.trim() ? 'bg-gray-200 text-gray-400' : 'bg-orange-500 text-white'}`}><Send className="w-5 h-5" /></button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const DiaryScreen = ({ diaryInput, setDiaryInput, diaryResult, generateDiary, isDiaryLoading, userProfile, isListening, toggleListening, listeningTarget, diaryHistory, profileImage }) => {
+            const isMyListening = isListening && listeningTarget === 'diary';
+            return (
+                <div className="flex flex-col h-full bg-gray-50 pb-20 pt-20">
+                    <div className="fixed top-0 w-full max-w-md bg-white z-10 p-4 shadow-sm flex items-center justify-between safe-area-top left-0 right-0 mx-auto">
+                        <h2 className="font-bold text-lg text-gray-800 flex items-center"><Book className="w-5 h-5 text-orange-500 mr-2" /> AIわんこ日記</h2>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4">
+                        <div className="bg-white p-5 rounded-2xl shadow-sm mb-6 border border-gray-100">
+                            <div className="flex justify-between items-center mb-2">
+                                <label className="block text-sm font-bold text-gray-700 flex items-center"><PenTool className="w-4 h-4 mr-1 text-orange-500" /> 今日の出来事は？</label>
+                                <button onClick={() => toggleListening('diary')} className={`p-2 rounded-full transition-all duration-300 flex items-center space-x-1 ${isMyListening ? 'bg-red-50 text-red-500 ring-2 ring-red-500 ring-opacity-50' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                                    {isMyListening ? <><span className="relative flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span></span><span className="text-xs font-bold">録音中</span></> : <><Mic className="w-4 h-4" /><span className="text-xs font-medium">音声入力</span></>}
+                                </button>
+                            </div>
+                            <div className="relative">
+                                <textarea value={diaryInput} onChange={(e) => setDiaryInput(e.target.value)} placeholder="例：今日はドッグランに行った。大きなゴールデンレトリバーと遊んだ。帰りに雨に降られてビショビショになった。" className={`w-full p-3 bg-gray-50 rounded-xl border focus:outline-none focus:ring-2 text-sm h-24 mb-3 resize-none transition-colors ${isMyListening ? 'border-red-300 ring-1 ring-red-200 bg-red-50/30' : 'border-gray-200 focus:ring-orange-500'}`} />
+                            </div>
+                            <button onClick={generateDiary} disabled={!diaryInput.trim() || isDiaryLoading} className={`w-full py-3 rounded-xl font-bold shadow-md transition-all flex items-center justify-center ${!diaryInput.trim() || isDiaryLoading ? 'bg-gray-200 text-gray-400' : 'bg-orange-500 text-white active:scale-[0.98]'}`}>
+                                {isDiaryLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Sparkles className="w-4 h-4 mr-2" /> 愛犬になりきって書く</>}
+                            </button>
+                        </div>
+                        <div className="space-y-4">
+                            <h3 className="font-bold text-gray-700 ml-1">📖 日記帳</h3>
+                            {diaryResult && (
+                                <div className="bg-gradient-to-br from-yellow-50 to-orange-50 p-6 rounded-2xl shadow-md border border-orange-100 relative overflow-hidden animate-in slide-in-from-top">
+                                    <div className="absolute top-0 right-0 w-24 h-24 bg-orange-100 rounded-full -mr-8 -mt-8 opacity-50"></div>
+                                    <div className="relative z-10">
+                                        <div className="flex items-center mb-3">
+                                            <div className="w-10 h-10 rounded-full border-2 border-orange-200 mr-3 shadow-sm overflow-hidden bg-white">{profileImage ? <img src={profileImage} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center">🐕</div>}</div>
+                                            <div><p className="text-xs text-gray-500">{new Date().toLocaleDateString()} (今日)</p><p className="font-bold text-gray-800">{userProfile.name}の日記</p></div>
+                                        </div>
+                                        <p className="text-gray-700 text-sm leading-relaxed font-medium whitespace-pre-wrap">{diaryResult}</p>
+                                    </div>
+                                </div>
+                            )}
+                            {diaryHistory.slice().reverse().map((entry, idx) => (
+                                <div key={idx} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
+                                    <div className="flex items-center mb-3">
+                                        <div className="w-8 h-8 rounded-full border border-gray-200 mr-3 overflow-hidden bg-gray-50 opacity-80">{profileImage ? <img src={profileImage} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm">🐕</div>}</div>
+                                        <div><p className="text-xs text-gray-400">{entry.date}</p></div>
+                                    </div>
+                                    <p className="text-gray-600 text-sm leading-relaxed whitespace-pre-wrap">{entry.text}</p>
+                                </div>
+                            ))}
+                            {diaryHistory.length === 0 && !diaryResult && <div className="text-center py-8 opacity-50"><p className="text-sm text-gray-400">まだ日記はありません</p></div>}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const HomeScreen = ({ userProfile, setShowPlanModal, setShowKitchenModal, setShowOutingModal, handleStartLesson, lessons }) => (
+            <div className="pb-24 animate-in fade-in duration-500 pt-16">
+                <div className="p-4">
+                    <div className="bg-gradient-to-r from-orange-500 to-amber-500 rounded-2xl p-5 text-white shadow-lg relative overflow-hidden">
+                        <div className="relative z-10 flex justify-between items-start">
+                            <div><p className="text-orange-100 text-sm mb-1">今日の目標</p><h2 className="text-2xl font-bold mb-2">あと1回トレーニング</h2><p className="text-sm opacity-90 flex items-center"><Activity className="w-4 h-4 mr-1" /> 連続記録: {userProfile.streak}日目</p></div>
+                            <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm"><Award className="w-8 h-8 text-white" /></div>
+                        </div>
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-10 -mt-10"></div>
+                    </div>
+                </div>
+                <div className="px-4 mb-2 grid grid-cols-2 gap-3">
+                    <div onClick={() => setShowPlanModal(true)} className="bg-gradient-to-br from-indigo-500 to-blue-600 p-4 rounded-xl shadow-md flex flex-col justify-between text-white cursor-pointer active:scale-[0.98] transition-transform h-28"><div className="bg-white/20 p-2 rounded-lg w-fit backdrop-blur-sm mb-2"><Calendar className="w-5 h-5" /></div><div><h3 className="font-bold text-sm">週間プラン作成</h3><p className="text-[10px] text-blue-100 opacity-90 mt-1">Geminiが提案 ✨</p></div></div>
+                    <div onClick={() => setShowKitchenModal(true)} className="bg-gradient-to-br from-green-500 to-emerald-600 p-4 rounded-xl shadow-md flex flex-col justify-between text-white cursor-pointer active:scale-[0.98] transition-transform h-28"><div className="bg-white/20 p-2 rounded-lg w-fit backdrop-blur-sm mb-2"><ChefHat className="w-5 h-5" /></div><div><h3 className="font-bold text-sm">AIわんこキッチン</h3><p className="text-[10px] text-green-100 opacity-90 mt-1">手作りレシピ ✨</p></div></div>
+                    <div onClick={() => setShowOutingModal(true)} className="bg-gradient-to-br from-pink-500 to-rose-600 p-4 rounded-xl shadow-md flex flex-col justify-between text-white cursor-pointer active:scale-[0.98] transition-transform h-28 col-span-2"><div className="flex items-start justify-between"><div className="bg-white/20 p-2 rounded-lg w-fit backdrop-blur-sm mb-2"><MapPin className="w-5 h-5" /></div><Tent className="w-10 h-10 text-white/20" /></div><div><h3 className="font-bold text-sm">AIお出かけプランナー</h3><p className="text-[10px] text-pink-100 opacity-90 mt-1">場所を入力してプラン作成 ✨</p></div></div>
+                </div>
+                <div className="px-4 mt-6">
+                    <h3 className="font-bold text-lg text-gray-800 mb-3 flex items-center">おすすめレッスン<span className="ml-2 text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">AI推奨</span></h3>
+                    <div className="grid grid-cols-1 gap-4">
+                        {lessons.map((lesson) => (
+                            <div key={lesson.id} onClick={() => handleStartLesson(lesson)} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer hover:shadow-md transition-shadow active:scale-[0.98]">
+                                <div className="flex items-center space-x-4"><div className={`w-12 h-12 rounded-full ${lesson.color} flex items-center justify-center text-2xl`}>{lesson.icon}</div><div><h4 className="font-bold text-gray-800">{lesson.title}</h4><p className="text-xs text-gray-500 mt-0.5">{lesson.description}</p><div className="flex items-center mt-2 space-x-2"><span className="text-xs px-2 py-0.5 bg-gray-100 rounded-md text-gray-600">{lesson.difficulty}</span><span className="text-xs text-gray-400 flex items-center"><Activity className="w-3 h-3 mr-1"/> {lesson.duration}</span></div></div></div><ChevronRight className="text-gray-300" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+
+        const PlanModal = ({ setShowPlanModal, userProfile, generateWeeklyPlan, weeklyPlan, isPlanLoading }) => (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+                <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+                    <button onClick={() => setShowPlanModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10"><X className="w-6 h-6" /></button>
+                    <div className="text-center mb-6 pt-2"><div className="w-16 h-16 bg-blue-100 rounded-full mx-auto flex items-center justify-center mb-3"><Calendar className="w-8 h-8 text-blue-600" /></div><h3 className="text-xl font-bold text-gray-800">AI週間プラン作成</h3><p className="text-sm text-gray-500 mt-1">{userProfile.name}ちゃん（{userProfile.breed}）に<br/>ぴったりのメニューを考えます</p></div>
+                    {!weeklyPlan && !isPlanLoading && (
+                        <div className="space-y-4">
+                            <div className="bg-gray-50 p-4 rounded-xl text-sm text-gray-600"><p className="mb-2">📋 <b>現在のステータス:</b></p><ul className="list-disc list-inside space-y-1 ml-1"><li>レベル: {userProfile.level}</li><li>性格: {userProfile.personality}</li><li>得意: お座り</li><li>課題: 待て（集中力）</li></ul></div>
+                            <button onClick={generateWeeklyPlan} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-[0.98] transition-all flex items-center justify-center"><Sparkles className="w-5 h-5 mr-2" /> プランを生成する</button>
+                        </div>
+                    )}
+                    {isPlanLoading && <div className="py-12 text-center"><Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" /><p className="text-gray-600 font-medium">Geminiが思考中...</p><p className="text-xs text-gray-400 mt-2">最適なバランスを計算しています</p></div>}
+                    {weeklyPlan && (
+                        <div className="animate-in slide-in-from-bottom duration-300 overflow-y-auto flex-1"><div className="bg-blue-50 p-4 rounded-xl text-sm text-gray-800 whitespace-pre-wrap leading-relaxed mb-4 border border-blue-100">{weeklyPlan}</div><button onClick={() => setShowPlanModal(false)} className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-200">閉じる</button></div>
+                    )}
+                </div>
+            </div>
+        );
+
+        const KitchenModal = ({ setShowKitchenModal, ingredients, setIngredients, generateRecipe, recipeResult, isRecipeLoading, setRecipeResult }) => (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+                <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+                    <button onClick={() => setShowKitchenModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10"><X className="w-6 h-6" /></button>
+                    <div className="text-center mb-6 pt-2"><div className="w-16 h-16 bg-green-100 rounded-full mx-auto flex items-center justify-center mb-3"><ChefHat className="w-8 h-8 text-green-600" /></div><h3 className="text-xl font-bold text-gray-800">AIわんこキッチン</h3><p className="text-sm text-gray-500 mt-1">冷蔵庫の食材から<br/>愛犬用レシピを考案します</p></div>
+                    {!recipeResult && !isRecipeLoading && (
+                        <div className="space-y-4">
+                            <div className="bg-gray-50 p-4 rounded-xl text-sm text-gray-600"><label className="block font-bold text-gray-700 mb-2">食材を入力してください</label><input type="text" value={ingredients} onChange={(e) => setIngredients(e.target.value)} placeholder="例：鶏肉, さつまいも, にんじん" className="w-full p-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-green-500 bg-white" /><p className="text-xs text-gray-400 mt-2">※アレルギーのある食材は避けてください</p></div>
+                            <button onClick={generateRecipe} disabled={!ingredients.trim()} className={`w-full py-4 rounded-xl font-bold shadow-lg transition-all flex items-center justify-center ${ingredients.trim() ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-green-200 active:scale-[0.98]' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}><Utensils className="w-5 h-5 mr-2" /> レシピを考案する</button>
+                        </div>
+                    )}
+                    {isRecipeLoading && <div className="py-12 text-center"><Loader2 className="w-10 h-10 text-green-600 animate-spin mx-auto mb-4" /><p className="text-gray-600 font-medium">Geminiシェフが考案中...</p><p className="text-xs text-gray-400 mt-2">栄養バランスを調整しています</p></div>}
+                    {recipeResult && (
+                        <div className="animate-in slide-in-from-bottom duration-300 overflow-y-auto flex-1"><div className="bg-green-50 p-4 rounded-xl text-sm text-gray-800 whitespace-pre-wrap leading-relaxed mb-4 border border-green-100">{recipeResult}</div><button onClick={() => { setRecipeResult(null); setIngredients(''); }} className="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-50 mb-2">別の食材で作る</button><button onClick={() => setShowKitchenModal(false)} className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-200">閉じる</button></div>
+                    )}
+                </div>
+            </div>
+        );
+
+        const OutingModal = ({ setShowOutingModal, outingLocation, setOutingLocation, generateOutingPlan, outingResult, isOutingLoading, setOutingResult }) => (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+                <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+                    <button onClick={() => setShowOutingModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10"><X className="w-6 h-6" /></button>
+                    <div className="text-center mb-6 pt-2"><div className="w-16 h-16 bg-pink-100 rounded-full mx-auto flex items-center justify-center mb-3"><MapPin className="w-8 h-8 text-pink-600" /></div><h3 className="text-xl font-bold text-gray-800">AIお出かけプランナー</h3><p className="text-sm text-gray-500 mt-1">行きたい場所から<br/>愛犬に合ったプランを提案</p></div>
+                    {!outingResult && !isOutingLoading && (
+                        <div className="space-y-4">
+                            <div className="bg-gray-50 p-4 rounded-xl text-sm text-gray-600"><label className="block font-bold text-gray-700 mb-2">行き先や雰囲気</label><input type="text" value={outingLocation} onChange={(e) => setOutingLocation(e.target.value)} placeholder="例：軽井沢, 近くの涼しい公園" className="w-full p-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-500 bg-white" /><p className="text-xs text-gray-400 mt-2">※愛犬の性格も考慮してプランを組みます</p></div>
+                            <button onClick={generateOutingPlan} disabled={!outingLocation.trim()} className={`w-full py-4 rounded-xl font-bold shadow-lg transition-all flex items-center justify-center ${outingLocation.trim() ? 'bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-pink-200 active:scale-[0.98]' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}><Tent className="w-5 h-5 mr-2" /> プランを作成する</button>
+                        </div>
+                    )}
+                    {isOutingLoading && <div className="py-12 text-center"><Loader2 className="w-10 h-10 text-pink-600 animate-spin mx-auto mb-4" /><p className="text-gray-600 font-medium">Geminiがリサーチ中...</p><p className="text-xs text-gray-400 mt-2">ドッグフレンドリーな場所を探しています</p></div>}
+                    {outingResult && (
+                        <div className="animate-in slide-in-from-bottom duration-300 overflow-y-auto flex-1"><div className="bg-pink-50 p-4 rounded-xl text-sm text-gray-800 whitespace-pre-wrap leading-relaxed mb-4 border border-pink-100">{outingResult}</div><button onClick={() => { setOutingResult(null); setOutingLocation(''); }} className="w-full bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-50 mb-2">別の場所を探す</button><button onClick={() => setShowOutingModal(false)} className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-200">閉じる</button></div>
+                    )}
+                </div>
+            </div>
+        );
+
+        const TrainingScreen = ({ setCurrentScreen, selectedLesson, analysisState, handleSimulateAnalysis, analysisResult, setShowVideoModal }) => (
+            <div className="flex flex-col h-full bg-gray-50 animate-in slide-in-from-right duration-300">
+                <div className="bg-white p-4 shadow-sm flex items-center sticky top-0 z-10 safe-area-top">
+                    <button onClick={() => setCurrentScreen('home')} className="p-2 hover:bg-gray-100 rounded-full mr-2"><X className="w-6 h-6 text-gray-500" /></button>
+                    <div><h2 className="font-bold text-lg">{selectedLesson.title}</h2><p className="text-xs text-gray-500">AIトレーナーモード</p></div>
+                </div>
+                <div className="flex-1 overflow-y-auto pb-24">
+                    {analysisState === 'idle' && (
+                        <div className="p-4 flex flex-col items-center">
+                            <div className="w-full bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-6 text-center">
+                                <div className="w-20 h-20 bg-orange-50 rounded-full mx-auto flex items-center justify-center text-4xl mb-4">{selectedLesson.icon}</div>
+                                <h3 className="font-bold text-gray-800 mb-2">お手本ポイント</h3>
+                                <p className="text-sm text-gray-600 mb-4 leading-relaxed">1. おやつを鼻先に近づける<br/>2. ゆっくりと頭上後方へ動かす<br/>3. お尻がついたらすぐに褒める</p>
+                                <button onClick={() => setShowVideoModal(true)} className="text-orange-500 text-sm font-medium flex items-center justify-center mx-auto hover:bg-orange-50 p-2 rounded-lg transition-colors"><Play className="w-4 h-4 mr-1" /> お手本動画を見る</button>
+                            </div>
+                            <div className="w-full"><p className="text-center text-sm text-gray-500 mb-4">あなたの練習動画を解析します</p><button onClick={handleSimulateAnalysis} className="w-full bg-gray-900 text-white rounded-2xl py-6 flex flex-col items-center justify-center shadow-lg active:scale-[0.98] transition-all"><div className="bg-gray-800 p-4 rounded-full mb-3"><Camera className="w-8 h-8 text-white" /></div><span className="font-bold">カメラで撮影して解析</span><span className="text-xs text-gray-400 mt-1">または動画を選択</span></button></div>
+                        </div>
+                    )}
+                    {analysisState === 'recording' && <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-in fade-in"><div className="relative w-32 h-32 mb-8 flex items-center justify-center"><div className="absolute inset-0 bg-red-100 rounded-full animate-ping opacity-75"></div><div className="relative bg-white p-6 rounded-full shadow-lg z-10"><Camera className="w-12 h-12 text-red-500" /></div></div><h3 className="text-2xl font-bold text-gray-800 mb-2">撮影中...</h3><p className="text-gray-500">練習を行ってください</p></div>}
+                    {analysisState === 'analyzing' && (
+                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-in fade-in">
+                            <div className="w-full max-w-xs bg-white rounded-2xl p-6 shadow-xl mb-8">
+                                <div className="h-40 bg-gray-100 rounded-lg mb-4 relative overflow-hidden flex items-center justify-center"><span className="text-4xl filter blur-[2px] opacity-50 grayscale">{selectedLesson.icon}</span><div className="absolute top-0 left-0 w-full h-1 bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.8)] animate-[scan_2s_ease-in-out_infinite]"></div></div>
+                                <div className="space-y-3"><div className="flex items-center text-sm text-gray-600"><CheckCircle className="w-4 h-4 text-green-500 mr-2" /> 骨格検知完了</div><div className="flex items-center text-sm text-gray-600"><div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mr-2"></div> AI解析中...</div></div>
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-800 animate-pulse">AIがアドバイスを生成中</h3>
+                        </div>
+                    )}
+                    {analysisState === 'result' && analysisResult && (
+                        <div className="p-4 animate-in slide-in-from-bottom duration-500">
+                            <div className={`rounded-2xl p-6 text-white mb-6 shadow-lg ${analysisResult.type === 'success' ? 'bg-gradient-to-br from-green-500 to-emerald-600' : 'bg-gradient-to-br from-orange-500 to-red-500'}`}>
+                                <div className="flex justify-between items-start mb-4"><h3 className="font-bold text-lg opacity-90">AI診断結果</h3><span className="bg-white/20 px-3 py-1 rounded-full text-sm font-bold backdrop-blur-md">{analysisResult.score}点</span></div>
+                                <div className="flex items-center mb-4"><div className="bg-white/20 p-3 rounded-full mr-4 backdrop-blur-md">{analysisResult.type === 'success' ? <Award className="w-8 h-8" /> : <AlertCircle className="w-8 h-8" />}</div><h2 className="text-2xl font-bold leading-tight">{analysisResult.title}</h2></div>
+                                <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm"><p className="text-sm leading-relaxed">{analysisResult.details}</p></div>
+                            </div>
+                            <div className="flex space-x-3"><button onClick={handleSimulateAnalysis} className="flex-1 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold shadow-sm active:bg-gray-50">もう一度トライ</button><button onClick={() => setCurrentScreen('home')} className="flex-1 bg-orange-500 text-white py-3 rounded-xl font-bold shadow-md shadow-orange-200 active:bg-orange-600">完了して戻る</button></div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+
+        // --- メインアプリ ---
+        function App() {
+            const [currentScreen, setCurrentScreen] = useState('home');
+            const [selectedLesson, setSelectedLesson] = useState(null);
+            
+            const [analysisState, setAnalysisState] = useState('idle'); 
+            const [analysisResult, setAnalysisResult] = useState(null);
+
+            const [chatInput, setChatInput] = useState('');
+            const [chatHistory, setChatHistory] = useState([{ role: 'assistant', text: 'こんにちは！AIドッグトレーナーです。愛犬のしつけや悩みについて、なんでも相談してくださいワン！🐶' }]);
+            const [isChatLoading, setIsChatLoading] = useState(false);
+            const chatEndRef = useRef(null);
+
+            const [showPlanModal, setShowPlanModal] = useState(false);
+            const [weeklyPlan, setWeeklyPlan] = useState(null);
+            const [isPlanLoading, setIsPlanLoading] = useState(false);
+
+            const [showKitchenModal, setShowKitchenModal] = useState(false);
+            const [ingredients, setIngredients] = useState('');
+            const [recipeResult, setRecipeResult] = useState(null);
+            const [isRecipeLoading, setIsRecipeLoading] = useState(false);
+
+            const [showOutingModal, setShowOutingModal] = useState(false);
+            const [outingLocation, setOutingLocation] = useState('');
+            const [outingResult, setOutingResult] = useState(null);
+            const [isOutingLoading, setIsOutingLoading] = useState(false);
+
+            const [diaryInput, setDiaryInput] = useState('');
+            const [diaryResult, setDiaryResult] = useState(null);
+            const [diaryHistory, setDiaryHistory] = useState([]);
+            const [isDiaryLoading, setIsDiaryLoading] = useState(false);
+            
+            const [isListening, setIsListening] = useState(false);
+            const [listeningTarget, setListeningTarget] = useState(null);
+            const recognitionRef = useRef(null);
+
+            const [showVideoModal, setShowVideoModal] = useState(false);
+
+            const [showProfileModal, setShowProfileModal] = useState(false);
+            const [profileImage, setProfileImage] = useState(null);
+            const [userProfile, setUserProfile] = useState({ name: 'こむぎ', breed: '柴犬', gender: '男の子', personality: 'ツンデレ', level: 3, xp: 350, nextLevelXp: 500, streak: 5 });
+
+            // API Helper
+            const callGemini = async (prompt) => {
+                try {
+                    const apiKey = GEMINI_API_KEY; 
+                    if (!apiKey) { alert("APIキーが設定されていません。コード内のGEMINI_API_KEYを確認してください。"); return "APIキー設定エラー"; }
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
+                    const data = await response.json();
+                    return data.candidates?.[0]?.content?.parts?.[0]?.text || "すみません、うまく答えられませんでした。";
+                } catch (error) { console.error(error); return "通信エラーが発生しました。"; }
+            };
+
+            const toggleListening = (target) => {
+                if (isListening) { if (recognitionRef.current) recognitionRef.current.stop(); setIsListening(false); setListeningTarget(null); } 
+                else {
+                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    if (!SpeechRecognition) { alert("お使いのブラウザは音声入力に対応していません。"); return; }
+                    setListeningTarget(target);
+                    const recognition = new SpeechRecognition();
+                    recognition.lang = 'ja-JP'; recognition.interimResults = true; recognition.continuous = true;
+                    recognition.onstart = () => setIsListening(true);
+                    recognition.onresult = (event) => {
+                        let finalTranscript = '';
+                        for (let i = event.resultIndex; i < event.results.length; ++i) if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
+                        if (finalTranscript) {
+                            if (target === 'diary') setDiaryInput(prev => prev + (prev ? ' ' : '') + finalTranscript);
+                            else if (target === 'chat') setChatInput(prev => prev + (prev ? ' ' : '') + finalTranscript);
+                        }
+                    };
+                    recognition.onerror = () => { setIsListening(false); setListeningTarget(null); };
+                    recognition.onend = () => { setIsListening(false); setListeningTarget(null); };
+                    recognition.start(); recognitionRef.current = recognition;
+                }
+            };
+
+            const handleSendMessage = async () => { if (!chatInput.trim()) return; const userMessage = chatInput; setChatHistory(prev => [...prev, { role: 'user', text: userMessage }]); setChatInput(''); setIsChatLoading(true); const aiResponse = await callGemini(`あなたはドッグトレーナーAIです。犬の情報(名前:${userProfile.name},犬種:${userProfile.breed})。質問:${userMessage}`); setChatHistory(prev => [...prev, { role: 'assistant', text: aiResponse }]); setIsChatLoading(false); };
+            const generateWeeklyPlan = async () => { setIsPlanLoading(true); const plan = await callGemini(`犬の週間トレーニングプラン作成。情報:${userProfile.name},${userProfile.breed},性格:${userProfile.personality}`); setWeeklyPlan(plan); setIsPlanLoading(false); };
+            const generateRecipe = async () => { if (!ingredients.trim()) return; setIsRecipeLoading(true); const recipe = await callGemini(`犬用レシピ考案。食材:${ingredients},犬種:${userProfile.breed}`); setRecipeResult(recipe); setIsRecipeLoading(false); };
+            const generateOutingPlan = async () => { if (!outingLocation.trim()) return; setIsOutingLoading(true); const plan = await callGemini(`犬とのお出かけプラン提案。場所:${outingLocation},犬種:${userProfile.breed}`); setOutingResult(plan); setIsOutingLoading(false); };
+            const generateDiary = async () => { if (!diaryInput.trim()) return; setIsDiaryLoading(true); const diary = await callGemini(`犬(${userProfile.name},${userProfile.breed})になりきって日記を書く。出来事:${diaryInput}`); setDiaryResult(diary); setDiaryHistory(prev => [...prev, { date: new Date().toLocaleDateString(), text: diary }]); setIsDiaryLoading(false); };
+            
+            const handleStartLesson = (lesson) => { setSelectedLesson(lesson); setCurrentScreen('training'); setAnalysisState('idle'); setAnalysisResult(null); };
+            const handleSimulateAnalysis = () => { setAnalysisState('recording'); setTimeout(() => { setAnalysisState('analyzing'); setTimeout(() => { const res = MOCK_FEEDBACK_DATA[selectedLesson?.id] || MOCK_FEEDBACK_DATA['sit']; const random = res[Math.floor(Math.random() * res.length)]; setAnalysisResult(random); setAnalysisState('result'); if(random.type === 'success') setUserProfile(p => ({...p, xp: p.xp + 50})); else setUserProfile(p => ({...p, xp: p.xp + 10})); }, 2500); }, 2000); };
+
+            return (
+                <div className="w-full h-full relative">
+                    {currentScreen !== 'chat' && currentScreen !== 'diary' && <Header userProfile={userProfile} setShowProfileModal={setShowProfileModal} profileImage={profileImage} />}
+                    <div className="flex-1 overflow-hidden relative" style={{ height: 'calc(100% - 70px)' }}>
+                        {currentScreen === 'home' && <>
+                            <HomeScreen userProfile={userProfile} setShowPlanModal={setShowPlanModal} setShowKitchenModal={setShowKitchenModal} setShowOutingModal={setShowOutingModal} handleStartLesson={handleStartLesson} lessons={LESSONS_DATA} />
+                            {showPlanModal && <PlanModal setShowPlanModal={setShowPlanModal} userProfile={userProfile} generateWeeklyPlan={generateWeeklyPlan} weeklyPlan={weeklyPlan} isPlanLoading={isPlanLoading} />}
+                            {showKitchenModal && <KitchenModal setShowKitchenModal={setShowKitchenModal} ingredients={ingredients} setIngredients={setIngredients} generateRecipe={generateRecipe} recipeResult={recipeResult} isRecipeLoading={isRecipeLoading} setRecipeResult={setRecipeResult} />}
+                            {showOutingModal && <OutingModal setShowOutingModal={setShowOutingModal} outingLocation={outingLocation} setOutingLocation={setOutingLocation} generateOutingPlan={generateOutingPlan} outingResult={outingResult} isOutingLoading={isOutingLoading} setOutingResult={setOutingResult} />}
+                            {showVideoModal && <VideoModal setShowVideoModal={setShowVideoModal} selectedLesson={selectedLesson} />}
+                            {showProfileModal && <ProfileModal userProfile={userProfile} setUserProfile={setUserProfile} setShowProfileModal={setShowProfileModal} profileImage={profileImage} setProfileImage={setProfileImage} />}
+                        </>}
+                        {currentScreen === 'training' && <TrainingScreen setCurrentScreen={setCurrentScreen} selectedLesson={selectedLesson} analysisState={analysisState} handleSimulateAnalysis={handleSimulateAnalysis} analysisResult={analysisResult} setShowVideoModal={setShowVideoModal} />}
+                        {currentScreen === 'chat' && <ChatScreen chatHistory={chatHistory} chatInput={chatInput} setChatInput={setChatInput} handleSendMessage={handleSendMessage} isChatLoading={isChatLoading} chatEndRef={chatEndRef} isListening={isListening} toggleListening={toggleListening} listeningTarget={listeningTarget} />}
+                        {currentScreen === 'diary' && <DiaryScreen diaryInput={diaryInput} setDiaryInput={setDiaryInput} diaryResult={diaryResult} generateDiary={generateDiary} isDiaryLoading={isDiaryLoading} userProfile={userProfile} isListening={isListening} toggleListening={toggleListening} listeningTarget={listeningTarget} diaryHistory={diaryHistory} profileImage={profileImage} />}
+                    </div>
+                    {currentScreen !== 'training' && <BottomNav currentScreen={currentScreen} setCurrentScreen={setCurrentScreen} />}
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
